@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hogwarts Battle Arena</title>
+    <style>
+        body {
+            margin: 0; background: linear-gradient(180deg, #0a0a23, #1a1a3e, #2a2a5e);
+            display: flex; flex-direction: column; align-items: center;
+            font-family: 'Arial', sans-serif; color: #ffd700; overflow: hidden;
+        }
+        canvas { border: 3px solid #ffd700; box-shadow: 0 0 30px #ffd700; }
+        .ui { position: absolute; top: 20px; left: 20px; font-size: 24px; text-shadow: 2px 2px 4px #000; }
+        .instructions { position: absolute; bottom: 20px; text-align: center; font-size: 18px; }
+    </style>
+</head>
+<body>
+    <div class="ui">
+        <div>Score: <span id="score">0</span></div>
+        <div>Health: <span id="health">100</span></div>
+    </div>
+    <canvas id="gameCanvas" width="1000" height="600"></canvas>
+    <div class="instructions">
+        Arrow Keys: Move | Space: Cast Spell | Survive 60 seconds to win!
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const healthEl = document.getElementById('health');
+
+        // Game state
+        let score = 0;
+        let health = 100;
+        let gameTime = 60;
+        const particles = [];
+
+        // Player (Harry)
+        const player = { x: 100, y: 300, width: 40, height: 40, speed: 5, spells: [] };
+
+        // Enemies (Death Eaters)
+        let enemies = [];
+        let lastEnemySpawn = 0;
+
+        // Controls
+        const keys = {};
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        // Particle system for spell effects
+        class Particle {
+            constructor(x, y, vx, vy, color) {
+                this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+                this.color = color; this.life = 30; this.size = 3;
+            }
+            update() {
+                this.x += this.vx; this.y += this.vy;
+                this.life--; this.size *= 0.98;
+            }
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.life / 30;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // Spawn enemy
+        function spawnEnemy() {
+            enemies.push({
+                x: canvas.width, y: Math.random() * (canvas.height - 100) + 50,
+                width: 35, height: 35, speed: 1 + Math.random() * 2,
+                health: 1
+            });
+        }
+
+        // Cast spell
+        function castSpell() {
+            player.spells.push({
+                x: player.x + player.width, y: player.y + player.height/2 - 5,
+                width: 20, height: 10, speed: 8
+            });
+            // Spell particles
+            for(let i = 0; i < 5; i++) {
+                particles.push(new Particle(
+                    player.x + player.width, player.y + player.height/2,
+                    -Math.random()*2 - 4, (Math.random()-0.5)*2, '#00ffff'
+                ));
+            }
+        }
+
+        // Collision detection
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // Update game logic
+        function update() {
+            // Player movement
+            if(keys['ArrowLeft'] && player.x > 0) player.x -= player.speed;
+            if(keys['ArrowRight'] && player.x < canvas.width - player.width) player.x += player.speed;
+            if(keys['ArrowUp'] && player.y > 0) player.y -= player.speed;
+            if(keys['ArrowDown'] && player.y < canvas.height - player.height) player.y += player.speed;
+            if(keys['Space']) { castSpell(); keys['Space'] = false; }
+
+            // Update spells
+            player.spells = player.spells.filter(spell => {
+                spell.x += spell.speed;
+                if(spell.x > canvas.width) return false;
+
+                // Check enemy hits
+                for(let i = enemies.length - 1; i >= 0; i--) {
+                    if(checkCollision(spell, enemies[i])) {
+                        enemies[i].health--;
+                        score += 10;
+                        scoreEl.textContent = score;
+
+                        // Hit particles
+                        for(let j = 0; j < 8; j++) {
+                            particles.push(new Particle(
+                                enemies[i].x + enemies[i].width/2,
+                                enemies[i].y + enemies[i].height/2,
+                                (Math.random()-0.5)*6, (Math.random()-0.5)*6, '#ff4444'
+                            ));
+                        }
+                        if(enemies[i].health <= 0) enemies.splice(i, 1);
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            // Spawn enemies
+            if(Date.now() - lastEnemySpawn > 1200 - Math.min(score/10, 500)) {
+                spawnEnemy();
+                lastEnemySpawn = Date.now();
+            }
+
+            // Update enemies
+            enemies = enemies.filter(enemy => {
+                enemy.x -= enemy.speed;
+                if(enemy.x < -enemy.width) return false;
+
+                // Player collision (damage)
+                if(checkCollision(player, enemy)) {
+                    health -= 0.5;
+                    healthEl.textContent = Math.max(0, Math.floor(health));
+                    enemy.x = canvas.width; // Knockback
+                    return true;
+                }
+                return true;
+            });
+
+            // Update particles
+            particles.forEach(p => p.update());
+            particles.filter(p => p.life <= 0);
+
+            // Game timer
+            gameTime -= 1/60;
+            if(gameTime <= 0 || health <= 0) {
+                alert(`Game Over! Final Score: ${score}`);
+                location.reload();
+            }
+        }
+
+        // Render everything
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Background stars
+            ctx.fillStyle = '#ffffff20';
+            for(let i = 0; i < 50; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.random()*canvas.width, Math.random()*canvas.height, 1, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            // Draw player (Harry)
+            ctx.fillStyle = '#ff4444';
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            ctx.fillStyle = '#ffd700';
+            ctx.fillRect(player.x + 10, player.y + 5, 20, 10); // Scarf
+
+            // Draw spells
+            ctx.fillStyle = '#00ffff';
+            player.spells.forEach(spell => ctx.fillRect(spell.x, spell.y, spell.width, spell.height));
+
+            // Draw enemies (Death Eaters)
+            ctx.fillStyle = '#4444ff';
+            enemies.forEach(enemy => ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height));
+
+            // Draw particles
+            particles.forEach(p => p.draw());
+
+            // Timer
+            ctx.fillStyle = '#ffd700';
+            ctx.font = 'bold 48px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(Math.ceil(gameTime), canvas.width/2, 60);
+        }
+
+        // Game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>
